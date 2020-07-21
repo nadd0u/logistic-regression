@@ -1,0 +1,875 @@
+---
+title: "Logistic Regression and Auto Insurance Claims"
+author: 'Nadia Noui-Mehidi'
+---
+```{r}
+library(lessR) 
+library(readr) 
+library(pbkrtest) 
+library(car) 
+library(leaps) 
+library(MASS)
+library(lessR) 
+library(mltools) 
+library(mice) 
+library(tidyRSS)
+library(VIM) 
+library(missForest) 
+library(effects)
+library(ggplot2) 
+library(scales) 
+library(grid) 
+library(RColorBrewer)
+library (data.table) 
+library (plyr) 
+library (stringr) 
+library(tidyverse)
+library(reshape2)
+library(ggridges)
+library(readr)
+library(dplyr)
+library(zoo)
+library(psych)
+library(ROCR)
+library(corrplot)
+library(car)
+library(InformationValue)
+library(pbkrtest)
+library(car)
+library(leaps)
+library(MASS)
+library(corrplot)
+library(glm2)
+library(aod)
+```
+
+```{r}
+evaluation <- read.csv(file="file:///Users/nadianoui-mehidi/Desktop/logit_insurance_test.csv",head=TRUE,sep=",")
+training <- read.csv(file="file:///Users/nadianoui-mehidi/Desktop/logit_insurance.csv",head=TRUE,sep=",")
+M <- rbind(training, evaluation) 
+quantitative <- c(4:8, 10, 15, 17, 18, 21, 22, 24, 25)
+names(M[quantitative])
+categorical <- c(13, 14, 19)
+names(M[categorical])
+binary <- c(9, 11, 12, 16, 20, 23, 26)
+names(M[binary])
+
+train <- read.csv(file="file:///Users/nadianoui-mehidi/Desktop/logit_insurance.csv",head=TRUE,sep=",")%>%
+  mutate(INCOME = as.numeric(gsub('[$,]','',INCOME)),
+         HOME_VAL = as.numeric(gsub('[$,]','',HOME_VAL)),
+         BLUEBOOK = as.numeric(gsub('[$,]','',BLUEBOOK)),
+         OLDCLAIM = as.numeric(gsub('[$,]','',OLDCLAIM)),
+         PARENT1 = tolower(gsub('[z_<]','', PARENT1)),
+         MSTATUS = tolower(gsub('[z_<]','', MSTATUS)),
+         SEX = tolower(gsub('[z_<]','', SEX)),
+         EDUCATION = tolower(gsub('[z_<]','', EDUCATION)),
+         JOB = tolower(gsub('[z_<]','', JOB)),
+         CAR_USE = tolower(gsub('[z_<]','', CAR_USE)),
+         CAR_TYPE = tolower(gsub('[z_<]','', CAR_TYPE)),
+         RED_CAR = tolower(gsub('[z_<]','', RED_CAR)),
+         REVOKED = tolower(gsub('[z_<]','', REVOKED)),
+         URBANICITY = tolower(gsub('[z_<]','', URBANICITY)))
+colnames(train) <- tolower(colnames(train))
+```
+
+# Introduction
+In this project we are predicting whether or not an insurance policy customer is likely to be involved in a car accident. Then, if it is determined that the customer is likely to be involved in a car accident, we provide a predictive estimate of the likely cost of the subsequent auto insurance claim.
+
+Our dataset contains data related to auto insurance policyholders, including indications of whether each policyholder has been involved in a past car accident and, if so, the amounts of the insurance claims payouts.There are 8161 rows, each representing behavioral and demographic information about a specific policyholder. For each policyholder we are provided with 23 attributes that could potentially be used as predictor variables, and two response variables:
+
+TARGET_FLAG: Indicates whether a client has been involved in a past car accident
+
+TARGET_AMOUNT: The insurance claim payout related to that past car accident
+
+
+
+The original data set contains 14 numeric predictors and one numeric response variable. A summary of the numeric variables is shown in the following table:
+```{r}
+quantitative <- c(4:8, 10, 15, 17, 18, 21, 22, 24, 25)
+numericvariables<-train[quantitative]
+library(Hmisc)
+#Hmisc::describe(numericvariables)
+library(psych)
+psych::describe(numericvariables)
+```
+
+The table provides evidence of potential skew for some variables, including 'home_val', 'income', 'bluebook', and 'old claim' as evidenced by the wide disparities between their means and medians.
+
+Seven of the independent variables (‘parent1’, ‘msstatus’, ‘sex’, ‘car_use’, ‘red_car’, ‘revoked’, and ‘urbanicity') are binary categorical variables which will need to be converted to factors. These variables, their levels, and the proportions that have gotten in car accidents are listed in the table shown below:
+
+```{r}
+mytable <- table(train$target_flag, train$parent1, dnn = "Observations by single parent")
+prop.table(mytable)
+mytable2 <- table(train$target_flag, train$msstatus, dnn = "Observations by msstatus")
+prop.table(mytable2)
+mytable3 <- table(train$target_flag, train$sex,dnn = "Observations by sex")
+prop.table(mytable3)
+mytable <- table(train$target_flag, train$car_use, dnn = "Observations by car use")
+prop.table(mytable)
+mytable2 <- table(train$target_flag, train$red_car, dnn = "Observations by red car")
+prop.table(mytable2)
+mytable3 <- table(train$target_flag, train$revoked,dnn = "Observations by revoked")
+prop.table(mytable3)
+mytable3 <- table(train$target_flag, train$urbanicity,dnn = "Observations by urbanicity")
+prop.table(mytable3)
+```
+
+```{r}
+#change binary to factors
+train$target_flag<-factor(train$target_flag)
+train$parent1<-factor(train$parent1)
+train$mstatus<-factor(train$mstatus)
+train$sex<-factor(train$sex)
+train$car_use<-factor(train$car_use)
+train$red_car<-factor(train$red_car)
+train$revoked<-factor(train$revoked)
+train$urbanicity<-factor(train$urbanicity)
+##change multi optiong to factors 
+train$education<-factor(train$education)
+train$job<-factor(train$job)
+train$car_type<-factor(train$car_type)
+```
+
+‘EDUCATION’, ‘JOB’, and ’CAR_TYPE are multi-categorical variables which will also need to be treated as factors. These variables, their levels and the proportion of each level that have gotten in a car accident are below:
+
+```{r}
+#aggregate(train$target_flag ~ train$sex+ train$urbanicity+ train$revoked+ train$job+train$parent1 + train$kidsdriv+ train$homekids+ train$car_use+ train$mstatus+ train$red_car, data=train, FUN=function(x) {sum(x)/length(x)})
+
+mytable <- table(train$target_flagg, train$job, dnn = "Observations by job")
+
+prop.table(mytable)
+mytable2 <- table(train$target_flagg, train$education, dnn = "Observations by education")
+
+prop.table(mytable2)
+mytable3 <- table(train$target_flagg, train$car_type,dnn = "Observations by car type")
+
+prop.table(mytable3)
+
+
+```
+
+# Exploratory Data Analysis 
+##Categorical Data
+Barplots allow us to develop some preliminary intuition regarding the predictive aspects of the data:
+
+```{r, echo = FALSE, message=FALSE, warning = FALSE}
+data0<- subset(train, target_flag == 1 )
+
+singleparent<-table(data0$target_flagg,data0$parent1)
+barplot(singleparent, xlab='single parent?',ylab='Car Accident?',main="car accident by single parent", col=c("darkblue","lightcyan") ,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+sex<-table(data0$target_flagg,data0$sex)
+barplot(sex, xlab='sex',ylab='Car Accident?',main="car accident by sex",
+col=c("darkblue","lightcyan"),legend=rownames(cross), args.legend = list(x = "topleft"))
+
+drivingchildren<-table(data0$target_flagg,data0$kidsdriv)
+barplot(drivingchildren, xlab='driving children?',ylab='Car Accident?',main="car accident by driving children",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+maritalstatus<-table(data0$target_flagg,data0$mstatus)
+barplot(maritalstatus, xlab='marital status?',ylab='Car Accident?',main="carr accident by marital status",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+education<-table(data0$target_flagg,data0$education)
+barplot(education, xlab='education',ylab='Car Accident?',main="car accidents by education",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+
+job<-table(data0$target_flagg,data0$job)
+barplot(job, xlab='job',ylab='Car Accident?',main="car accident by job",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+car_use<-table(data0$target_flagg,data0$car_use)
+barplot(car_use, xlab='car_use',ylab='Car Accident?',main="carr accident by car_use",
+col=c("darkblue","lightcyan") ,legend=rownames(cross), args.legend = list(x = "topleft"))
+car_type<-table(data0$target_flagg,data0$car_type)
+barplot(car_type, xlab='car_type',ylab='Car Accident?',main="carr accident by car type",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+red_car<-table(data0$target_flagg,data0$red_car)
+barplot(red_car, xlab='red_car',ylab='Car Accident?',main="carr accident by red_car",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+revoked<-table(data0$target_flagg,data0$revoked)
+barplot(revoked, xlab='revoked',ylab='Car Accident?',main="carr accident by revoked",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+
+urbanicity<-table(data0$target_flagg,data0$urbanicity)
+barplot(urbanicity, xlab='urbanicity',ylab='Car Accident?',main="carr accident by urbanicity",
+col=c("darkblue","lightcyan")
+,legend=rownames(cross), args.legend = list(x = "topleft"))
+```
+The barplots show us that policyholders who either have children living at home or have teenage drivers who use their vehicles are more likely to have been involved in accidents. Similarly, single parents, females, drivers of commercial vehicles, non-college graduates, students, blue collar workers, drivers of sports cars, and drivers who’ve had their license revoked in the past all appear to be more likely to be involved in car accidents than do drivers who are not members of those categories.
+
+
+##Numeric Data
+Larger values for ‘AGE’, ‘INCOME’, ‘HOME_VAL’, ‘BLUEBOOK’, ‘TIF’ and ‘CAR_AGE’ will each tend to decrease the likelihood that a policyholder will be involved in a car accident. 
+Larger values for ‘OLD_CLAIM’, ‘CLAIM_FREQ’, ‘MVR_PTS’ and’TRAVTIME’ will each tend to increase the likelihood that a policyholder will be involved in an accident. However, for 
+‘YOJ’ doesnt seem to have a relationship with ‘TARGET_FLAG’.
+
+```{r}
+
+# Histograms for Numeric Variables
+par(mfrow=c(2,2))
+hist(train$age, col = "navy", xlab = "Age", main = "AGE Hist")
+data0<- subset(train, target_flag == 1 )
+hist(log(data0$target_amt), col = "lightcyan", xlab = "Log TARGET_AMT", main = "Log TARGET_AMT Hist")
+boxplot(train$age~train$target_flag, col = "navy", main = "AGE BoxPlot")
+boxplot(log(data0$target_amt), col = "lightcyan", main = "LOG TARGET_AMT Boxplot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(sqrt(train$travtime), col = "lightgreen", xlab = "SQRT TRAVTIME", main = "SQRT TRAVTIME Hist")
+hist(train$yoj, col = "blue", xlab = "YOJ", main = "YOJ Hist")
+boxplot(sqrt(train$travtime)~train$target_flag, col = "lightgreen", main = "SQRT TRAVTIME BoxPlot")
+boxplot(train$yoj, col = "blue", main = "YOJ BoxPlot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(sqrt(train$bluebook), col = "green", xlab = "SQRT BLUEBOOK", main = "SQRT BLUEBOOK Hist")
+hist((train$tif), col = "blue", xlab = "TIF", main = "TIF Hist")
+boxplot(sqrt(train$bluebook)~train$target_flag, col = "green", main = "SQRT BLUEBOOK BoxPlot")
+boxplot(train$tif~train$target_flag, col = "blue", main = "TIF BoxPlot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(train$mvr_pts, col = "lightcyan", xlab = "MVR_PTS", main = "MVR_PTS Hist")
+hist(train$car_age, col = "blue", xlab = "CAR_AGE", main = "CAR_AGE Hist")
+boxplot(train$mvr_pts~train$target_flag, col = "lightcyan", main = "MVR_PTS BoxPlot")
+boxplot(train$car_age~train$target_flag, col = "blue", xlab = "CAR_AGE", main = "CAR_AGE BoxPlot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(train$kidsdriv, col = "lightcyan", xlab = "MVR_PTS", main = "MVR_PTS Hist")
+hist(train$homekids, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE Hist")
+boxplot(train$kidsdriv~train$target_flag, col = "lightcyan", main = "MVR_PTS BoxPlot")
+boxplot(train$homekids~train$target_flag, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE BoxPlot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(train$income, col = "lightcyan", xlab = "MVR_PTS", main = "MVR_PTS Hist")
+hist(train$home_val, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE Hist")
+boxplot(train$income~train$target_flag, col = "lightcyan", main = "MVR_PTS BoxPlot")
+boxplot(train$home_val~train$target_flag, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE BoxPlot")
+par(mfrow=c(1,1))
+
+par(mfrow=c(2,2))
+hist(train$oldclaim, col = "lightcyan", xlab = "MVR_PTS", main = "MVR_PTS Hist")
+hist(train$clm_freq, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE Hist")
+boxplot(train$oldclaim~train$target_flag, col = "lightcyan", main = "MVR_PTS BoxPlot")
+boxplot(train$clm_freq~train$target_flag, col = "navy", xlab = "CAR_AGE", main = "CAR_AGE BoxPlot")
+par(mfrow=c(1,1))
+
+```
+
+We find that age is roughly normally distributed, and the min/max also make sense.
+
+Travel time is right-skewed. Most people have commutes under an hour, but then there are a few individuals with very long commutes.
+
+As we might expect, all the variables representing dollar amounts (including TARGET_AMT) are right-skewed. We may want to log-transform these variables to bring them closer to normal.
+
+The histograms again demonstrate the skew issues we’ve previously identified while also indicating that the distributions of many of the skewed variables are zero-bound. For example, ‘INCOME’, ‘HOME_VAL’, ‘OLDCLAIM’, ‘CLM_FREQ’, ‘MVR_PTS’, AND ‘TARGET_AMT’ all appear to be zero-bound, while ‘CAR_AGE’ is bounded by values of (CAR_AGE = 1). Each of these variables, along with the ‘BLUEBOOK’ variable, is right-skewed and may need to be transformed using either a log function or perhaps a Box-Cox recommended power transform if their skew negatively impacts our regression models.
+###Bivariate Analysis 
+We find a less than 1% difference in the proportion of individuals with vs. without red cars who crash their vehicles.
+
+We also find a very minimal difference between genders, and it is actually females who have a slightly higher crash rate.
+
+Other than that, we find a lot of the differences we might have predicted. Individuals driving commercial vehicles, unmarried individuals, those whose licenses have been revoked, urban drivers, those who do not own homes, those who have had a claim in the past five years, and those with driving teenagers in their family all have crashes at a higher rate.
+
+We also find that single parents and those with one or more children at home crash at a higher rate.
+
+First of all, how are single parents defined? All unmarried people with kids in the home, or some other additional criteria? Let’s check.
+###PROPORTION RELATIVE TO TARGET
+
+The following table summarizes the proportional relationships of our binary predictor variables with the TARGET_FLAG response variable. A relatively large difference between the ‘yes’ and ‘no’ proportions indicates that a policyholder belonging to one of the indicated categories is more likely to be involved in a car accident than a policyholder not belonging to the same category. Note that the ‘SEX’ and ‘RED_CAR’ variables show relatively small differences between groupings and as such may be Candidates for exclusion from our regression models.
+While the majority of males, regardless of class or fare still don’t do so well, we notice that 
+```{r, warning = FALSE, fig.width=12}
+SurT<-table(train$target_flag)
+
+prop.table(SurT)
+
+
+#round(prop.table(SurT),digits=2)
+#cross<-table(train$target_flagg,train$sex)
+addmargins(table(train$target_flag,train$sex))
+addmargins(table(train$target_flag,train$urbanicity))
+addmargins(table(train$target_flag,train$revoked))
+addmargins(table(train$target_flag,train$job))
+addmargins(table(train$target_flag,train$parent1))
+addmargins(table(train$target_flag,train$kidsdriv))
+addmargins(table(train$target_flag,train$homekids))
+addmargins(table(train$target_flag,train$car_use))
+addmargins(table(train$target_flag,train$mstatus))
+addmargins(table(train$target_flag,train$red_car))
+#aggregate(train$target_flag ~ train$sex+ train$urbanicity+ train$revoked+ train$job+train$parent1 + train$kidsdriv+ train$homekids+ train$car_use+ train$mstatus+ train$red_car, data=train, FUN=function(x) {sum(x)/length(x)})
+
+#mytable <- table(train$target_flagg, train$sex,train$urbanicity,train$revoked, train$job,train$parent1,train$kidsdriv,train$homekids,train$car_use,train$mstatus, train$red_car)
+prop.table(mytable)
+#GGally::ggpairs(train%>%dplyr::select(-index, -target_amt)%>%select_if(is.numeric))
+```
+
+
+
+##Correlation 
+###correlation matrix
+A correlation matrix for the numeric variables contained within data set is provided below. As can be seen in the matrix, none of the numeric variables show evidence of a particularly strong correlation with either of the response variables, and none of the predictors appear to be more than 0.54 correlated with each other.
+```{r}
+library(tidyverse)
+library(corrplot)
+library(tidyverse)
+
+c <- cor(numericvariables, train$target_flag)
+corrplot(c, method = "square")
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+ggplot(data = melt(abs(cor(sapply(na.omit(train), as.numeric)))), aes(x=Var1, y=Var2, fill=value)) +
+  scale_fill_gradient(low = 'white', high = 'cyan', name = "Absolute Value") +
+  geom_tile() + labs(title = "Correlation Heatmap") +theme_bw()+
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        plot.title = element_text(hjust = 0.5))
+```
+
+However, the relative magnitudes of the correlation values can still be of use to us for purposes of constructing effective regression models. For example, a ranking of the correlations of each numeric predictor relative to the ‘TARGET_FLAG’ response can be used during model building to select variables that are more likely to be predictive of the response. The table below provides such a rank ordering:
+```{r}
+#need rank ordering table
+#numericvariables
+#binaryvariables
+
+categorical <- c(13, 14, 19)
+categoricalvariables<-train[categorical]
+
+PCA <- function(X) {
+  Xpca <- prcomp(na.omit(X), center = T, scale. = T) 
+  train <- as.matrix(na.omit(X)); R <- as.matrix(Xpca$rotation); score <- train %*% R
+  print(list("Importance of Components" = summary(Xpca)$importance[ ,1:5], 
+             "Rotation (Variable Loadings)" = Xpca$rotation[ ,1:5],
+             "Correlation between X and PC" = cor(na.omit(X), score)[ ,1:5]))
+  par(mfrow=c(2,3))
+  barplot(Xpca$sdev^2, ylab = "Component Variance")
+  barplot(cor(cbind(X)), ylab = "Correlations")
+  barplot(Xpca$rotation, ylab = "Loadings")  
+  biplot(Xpca); barplot(train); barplot(score)
+}
+PCA(train[quantitative])
+
+
+```
+
+Of the predictor variables that appear to be most correlated with each other, their relationships make sense from an intuitive perspective. For example, the correlation of ‘INCOME’ with ‘BLUEBOOK’ and ‘HOME_VAL’ unsurprisingly suggests that people with higher incomes tend to own more expensive vehicles and homes than do people with relatively lower incomes. Similarly, having kids living at home (HOMEKIDS) appears to be correlated with having teenagers that drive your car (KIDSDRIV). These correlations can be used during model building to help us avoid the potential inclusion of additional variables that may be collinear to those already included.
+##Conclusion of Data Exploration
+During our data exploration efforts we developed many useful insights into the predictive qualities of the potential predictor variables and discovered evidence of significant quantities of missing data values for several variables. The missing data values span approximately 21% of the observations we’ve been provided, which indicates a need for imputation of the missing values. We also identified several numeric variables (‘CAR_AGE’, ‘HOME_VAL’, ‘INCOME’, ‘OLDCLAIM’, ‘MVR_PTS’, CLM_FREQ’, and ‘BLUEBOOK’) that may require either a log or Box-Cox recommended power transformations during model building.
+```{r}
+names(train)
+```
+
+------------------------------------------------------------------------------------------------
+# Data Preparation
+Our data preparation efforts included the imputation of missing values for six of the predictor variables, the creation of three new binary factor variables (each derived from one of three of the provided predictor variables), and the conversion of two numeric predictor variables to binary “0/1” factor variables.
+
+While we also considered the possibility of transforming one or more of the predictor variables that have skewed distributions, we chose not to apply any such transforms prior to building binary models since normal distributions aren’t necessarily required for logistical regression modeling. Transforms can be applied if the marginal model plots for a logistic regression model show evidence of deviance between the modeled data and the actual data, but aren’t required prior to model building.
+
+Similarly, we chose not to preemptively transform any skewed distributions for purposes of linear modeling, and this approach allowed us to make use of different transforms for each of our linear models. Explanations of any model-specific transformations are discussed within the individual model writeups provided in Part 3.
+## ~*Missing Data*~
+###Step 1: Imputation of Missing Values (NA’s)
+As we can see in the table, five numeric variables have missing data values. The missing values appear as either ‘NA’ values or blank values in the data set. The ‘JOB’ categorical variable was also discovered to have a significant number of missing values. In fact, roughly 21% of the 8161 rows contained within the data set were found to have either ‘NA’ or blank values. The missing data values are summarized below by variable name.
+```{r}
+library(VIM)
+aggr_plot <- aggr(train, col=c('navyblue','pink'), numbers=TRUE, sortVars=TRUE, labels=names(train), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+
+####Imputation via Linear Regression: 4 Variables
+Our first data preparation step focused on the imputation of missing data values for five of the predictor variables: AGE, HOME_VAL, CAR_AGE, INCOME, and YOJ. 
+Regression and classification trees are used to impute missing values. We chose not to use the mean or median as a replacement value for these relatively large numbers of missing values since linear regression would yield imputed values that were much more consistent with the actual distribution of the data while introducing much less potential bias.
+
+The imputation strategies employed for each of these variables were as follows:
+Clean data is saved in a clean trainind dataset. 
+```{r}
+#Regression and classification trees are used to impute missing values for care age, home value, income, and age
+tempData <- mice(train,m=5,maxit=50,method='cart', seed=500)
+complete <- complete(tempData,1)
+
+```
+#####Inspecting the distribution of original and imputed data
+Let’s compare the distributions of original and imputed data using a some useful plots.
+```{r}
+xyplot(tempData, target_flag ~ car_age+home_val+yoj+income,pch=18,cex=1)
+densityplot(tempData)
+stripplot(tempData, pch = 20, cex = 1.2)
+```
+The density of the imputed data for each imputed dataset is showed in magenta while the density of the observed data is showed in blue. Under our previous assumptions we expect the distributions to be similar.
+Except for age. so maybe we dont use age. or treat age differently 
+####CAR_AGE
+We also discovered a single negative value (‘-3’) for CAR_AGE which seemed implausible. The negative value was converted to a positive number via simple use of its absolute value.
+```{r}
+complete$car_age=abs(complete$car_age)
+```
+
+## ~*Transformations*~
+####Binary into factor
+We turn the following binary variables into factors: 
+revoked
+urbanicity
+mstatus
+parent1
+caruse 
+revoked
+red_car
+sex
+```{r}
+complete$revoked<-factor(complete$revoked)
+complete$urbanicity<-factor(complete$urbanicity)
+complete$mstatus<-factor(complete$mstatus)
+complete$parent1<-factor(complete$parent1)
+complete$revoked<-factor(complete$revoked)
+complete$red_car<-factor(complete$red_car)
+complete$sex<-factor(complete$sex)
+complete$car_use<-factor(complete$car_use)
+```
+
+####Factor nominal data   
+We turn the following binary variables into factors: 
+###Transformation of Categorical Data into binary factors
+Variables transformed: 
+education
+job
+car_type
+
+New variables created: 
+college
+bluecollar
+student
+minivan
+SUV
+
+#####Education : 
+college education and non college educated?   
+1 if they only completed hs
+0 if they completed higher education
+```{r}
+
+complete$college<- ifelse(complete$education=='high school',1,0)
+complete$college<-factor(complete$college)
+head(complete$college)
+
+
+```
+#####Job
+We used the job variable to create student and bluecollar indicators
+bluecollar: 1 its a bluecollar job 0 otherwise 
+student: 1 if its a student 0 otherwise 
+```{r}
+levels(complete$job)
+complete$bluecollar<- ifelse(complete$job=='blue collar',1,0)
+complete$bluecollar<-factor(complete$bluecollar)
+complete$student<- ifelse(complete$job=='student',1,0)
+complete$student<-factor(complete$student)
+```
+#####car_type:  
+We used the car_type variable to create a minivan and SUV indicator
+bluecollar: 1 its a bluecollar job 0 otherwise 
+minivan: 1 if its a minivan 0 otherwise 
+suv: 1 if its an SUV 0 otherwise 
+
+```{r}
+complete$minivan<- ifelse(complete$car_type=='minivan',1,0)
+complete$minivan<-factor(complete$minivan)
+complete$suv<- ifelse(complete$car_type=='SUV',1,0)
+complete$suv<-factor(complete$suv)
+```
+
+###Transformation of Continuous Data into factors
+Variables transformed: 
+income
+trav time
+job
+
+New variables created: 
+highincome
+longcommute
+
+#####Income 
+We created a high income ariable for the the top quarter of income (85504)
+High income: 1 if Income > 85,000, 0 otherwhise 
+
+```{r}
+#summary(complete$income)
+complete$highincome <- ifelse((complete$income>=85000), 1, 0)
+
+complete$highincome<-factor(complete$highincome)
+head(complete$income)
+head(complete$highincome)
+```
+#####Travel Time 
+Travel time is right-skewed. Most people have commutes under an hour, but then there are a few individuals with very long commutes. so we did pulled the the top quarter of travel time (44.00) and made a binary variable that 
+3rd quartile value of income is 44.00
+1 if the travel is > 45 minutes, 0 if travel time < 45 minutes
+```{r}
+
+#summary(complete$travtime)
+head(train$travtime)
+complete$travtime <- ifelse((train$travtime>=45), 1, 0)
+
+complete$longcommute<-factor(complete$travtime)
+head(complete$travtime)
+```
+##Conclusion
+As should be evident from the discussion here, our data preparation efforts touched on a large percentage of the predictor variables contained within the training data set. Post-imputation summary statistics for the numeric predictor variables show that we haven’t substantively changed the skew or kurtosis of any of the variables that required imputation:
+
+```{r}
+skim_with(integer = list(hist = NULL))
+skim(complete)
+```
+------------------------------------------------------------------------------------------------
+# Models
+Three models are developed as part of this project - a logistic regression model using all available variablesm, a logistic regressiong model using backward selection, a logistic regression model using forward selection, and a linear regression model using the same variable selection technique. The binary logistic models are intended to predict the likelihood that a person will crash their car, while the linear regression models attempt to predict the likely amount of money it will cost an auto insurance company if the person does, in fact, crash their car. 
+
+##Binary Model 1: Logit Model using all the variables
+
+The initial iteration of this approach excluded the "income", "education", "job", ‘car_age’, "traveltime", "yoj", "kidsdriv", "age", "oldclaim", "homekids" and "car_type"variables for purposes of avoiding collinearity issues relative to the newly created "college", "bluecollar", "student", "minivan", "SUV", "highincome" and "longcommute" variables
+
+Variables included are:
+```{r}
+
+model = subset(complete, select = -c(travtime, kidsdriv,job, index, age, car_age, income, yoj, oldclaim, homekids, education,car_type,target_flagg) )
+
+names(model)
+
+```
+
+```{r}
+
+a <- glm(target_flag ~parent1+home_val+mstatus+sex+car_use+ bluebook+ tif+red_car+ clm_freq+ revoked+ mvr_pts+ urbanicity+ highincome+ young+ college+ bluecollar+ student+ minivan+ newjob+ pastclaim+ kids+ kidsdrive+ newcar+longcommute, model,family=binomial("logit"))
+summary(a)
+#anova(model, test="Chisq")
+```
+Following are the insights we can collect for the output above:
+
+In the presence of other variables, the variables "newcar", "kids", "student", "bluecollar", "claimfrequency", "redcar", "sex", and "parent1" are not significant.
+The AIC value of this model is 883.79.
+Let's create another model and try to achieve a lower AIC value
+##Binary Model 2: Logit Model Using Backward Selection
+Our second model is a logistic regression model developed with a backward variable selection process. Starting with a logit model using all possible variables the model iteratively works through possible sets of predictor variables, adding and dropping variables to minimize AIC[^2][^3]. 
+
+```{r}
+b<-stepAIC(a, scale = 0,
+        direction = c("both", "backward", "forward"),
+        trace = 1, keep = NULL, steps = 1000, use.start = FALSE,
+        k = 2)
+```
+Our model applied some simple backward selection and a logit link function in an attempt to identify the regression model that included only statistically significant p-values. Successive iterations removed the least statistically significant predictors (“sex”, “red car”, “claim frequency”, “student”, “new car” ) until all p-values were below 0.05. 
+The step() function and subsequent backward selection on the basis of p-values produced a model comprised of 19 statistically significant predictor variables.
+
+###Model Evaluation
+
+Now we can analyze the fitting and interpret what the model is telling us.
+
+```{r}
+S(b)
+
+#model coefficient estimates plot 
+a.parts <- summary(b)$coefficients%>%
+  data.frame()%>%
+  bind_cols(data.frame(vars = rownames(summary(b)$coefficients)))%>%
+  dplyr::select(est = Estimate, se = Std..Error, p = Pr...z.., vars)
+ggplot(a.parts, aes(x = reorder(vars, est), y = est, color = p))+
+  geom_errorbar(aes(ymin = est - se, ymax = est + se),
+                width = 0, size = 2)+
+  labs(y = 'Coefficient Estimate (+- 1 Standard Error)',
+       title = 'Model Coefficient Estimates',
+       x = element_blank())+
+  theme_bw()+
+  coord_flip()+
+  scale_color_gradient(high = "navyblue", low = "lightblue",
+                         breaks = c(0, .001, .01, .05, .1),guide = 'legend')+
+  geom_hline(yintercept = 0, linetype = 'dashed')
+```
+
+Now we can run the anova() function on the model to analyze the table of deviance
+```{r}
+anova(b, test="Chisq")
+```
+
+The difference between the null deviance and the residual deviance shows how our model is doing against the null model (a model with only the intercept). The wider this gap, the better. Analyzing the table we can see the drop in deviance when adding each variable one at a time. Again, adding Pclass, Sex and Age significantly reduces the residual deviance. The other variables seem to improve the model less even though SibSp has a low p-value. A large p-value here indicates that the model without the variable explains more or less the same amount of variation. Ultimately what you would like to see is a significant drop in deviance and the AIC.
+
+While no exact equivalent to the R2 of linear regression exists, the McFadden R2 index can be used to assess the model fit.
+
+```{r}
+library(pscl)
+pR2(b)
+```
+
+
+————————————————————————————————————————–
+
+
+##Binary Model 3: Forward Selection + AIC
+
+The Forward selection process adds predictor variables one-by-one beginning with the single best variable (according to p-value) and continues to add on variables until a certain cutoff.  In our case, the cutoff is a p-value of 0.05.  The summary of our results are in Table 3 below.
+
+```{r}
+library("MASS")
+glm.null <- glm(target_flag ~ 1, data = model, family = binomial)
+c <- step(glm.null, direction = "forward", trace = 1, scope = ~ parent1+home_val+mstatus+sex+car_use+ bluebook+ tif+red_car+ clm_freq+ revoked+ mvr_pts+ urbanicity+ highincome+ young+ college+ bluecollar+ student+ minivan+ newjob+ pastclaim+ kids+ kidsdrive+ newcar+longcommute)
+```
+
+
+```{r}
+S(c)
+```
+
+```{r}
+anova(c,test="Chisq")
+```
+
+A plot of the standardized deviance residuals for this model revealed no high leverage outliers, and the marginal model plots show very strong agreement between the modeled data and the actual data, with a minute amount of deviance evident only in the log(TRAVTIME) and log(MVR_PTS + 1) plot:
+```{r}
+#marginal model plots 
+marginalModelPlots(c)
+```
+
+
+————————————————————————————————————————–
+
+#Select Models
+```{r}
+AIC(a)
+BIC(a)
+AIC(b)
+BIC(b)
+AIC(c)
+BIC(c)
+
+print(-2*logLik(a, REML = TRUE))
+print(-2*logLik(b, REML = TRUE))
+print(-2*logLik(c, REML = TRUE))
+
+
+
+model$aPrediction <- predict(a, type = "response")
+model$bPrediction <- predict(b, type = "response")
+model$cPrediction <- predict(c, type = "response")
+ks_stat(actuals=model$target_flag, predictedScores=model$aPrediction)
+ks_stat(actuals=model$target_flag, predictedScores=model$bPrediction)
+ks_stat(actuals=model$target_flag, predictedScores=model$cPrediction)
+```
+
+
+```{r}
+#CHECKING PREDICTIVE ABILITY 
+fitted.results<-predict(a1,newdata=subset(model,select=c(2,3,4,5,6,7,8)),type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+misClasificError <- mean(fitted.results != model$target)
+print(paste('Accuracy',1-misClasificError))
+```
+
+```{r}
+##ROC CURVE  AND AUC TEST
+library(ROCR)
+p <- predict(a1, type="response")
+pr <- prediction(p, model$target)
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+```
+# We'll choose Model 3, here are its coefficients
+coef(Model3)
+##Binary Regression Models
+Step 1: Compare Key statistics
+The chart below summarizes the model statistics for our three binary logistic regression models. The models are listed from left to right in accordance with the order in which they were described in Part 3.
+
+The three models are evaluated based on the McFadden Pseudo $R^2$ statistic, the Kolmagorov - Smirnov (KS) statistic, area under the curve (AUC), and Root-Mean Squared Error (RMSE). All calculations are cross-validated using 1,000 iterations of sampled model training and out-of-sample model testing.
+
+McFadden offers a stand-in for the kind of $R^2$ used to evaluate OLS regression models[^4]. The Probit model explains the greatest amount of variance followed closely by the bi-directional logit model. The heuristic logit model trailed significantly.
+
+The KS statistic compares the cumulative distribution of the model predictions to the ideal distribution for that data. In this case, the heuristic model performed best of all three. While the KS-statistic is a more formal test for appropriateness of the cumulative distribution curve, Figures 2.3, 3.3, and 4.3 all indicated significant depression of scores towards lower-end probabilities than were appropriate. The heuristic model was the closest by appearance to the ideal distribution and the KS-statistic confirms that hunch. 
+
+AUC "relates the hit rate to the false alarm rate" in classification modeling [^5]. The heuristic model was far, far behind on this model and produced highly unstable scores. For production purposes, consistent scores will ease adoption of the model, so to the extent that political concerns factor into model selection, the inconsistency inthe AUC measures for the heuristic model are problematic. 
+
+Finally, cross-validated RMSE tests hold-out sample predictions against known values. The bidirectional logit model slightly outperforms the bidirectional probit model, but not by any significant margin. That said, the heuristic model lags significantly. 
+
+```{r, fig.width=10, fig.height=5}
+gof_comb <- bind_rows(log1gof, log2gof, propgof)
+mcfaddenrsq.plot <- ggplot(gof_comb, aes(x = mcfaddenrsq, y = method))+
+  geom_density_ridges(fill = yaz_cols[5], alpha = .7)+
+  labs(title = expression(paste("McFadden's ", R^{2})),
+       x = expression(paste("McFadden's ", R^{2})),
+       y = element_blank())+
+  theme_bw()
+kstest.plot <- ggplot(gof_comb, aes(x = ks.stat, y = method))+
+  geom_density_ridges(fill = yaz_cols[5], alpha = .7)+
+  labs(title = 'KS - Test',
+       x = 'KS - Statistic',
+       y = element_blank())+
+  theme_yaz()
+auc.plot <- ggplot(gof_comb, aes(x = auc, y = method))+
+  geom_density_ridges(fill = yaz_cols[5], alpha = .7)+
+  labs(title = 'Area Under (ROC)',
+       x = 'AUC',
+       y = element_blank())+
+  theme_yaz()
+rmse.plot <- ggplot(gof_comb, aes(x = rmse, y = method))+
+  geom_density_ridges(fill = yaz_cols[5], alpha = .7)+
+  labs(title = 'RMSE',
+       x = 'RMSE',
+       y = element_blank())+
+  theme_yaz()
+grid.arrange(mcfaddenrsq.plot, kstest.plot, auc.plot, rmse.plot,
+             nrow = 2)
+```
+
+Step-wise variable selection is a computationally expensive process, but the gains in predictive accuracy more than justify the added time required to train these models. Both logistic regression and probit regression are easy enough to explain to management if the predictions are correct. Therefore the winning model is the Bidirectional Stepwise Probit method.
+#predict idk if this is needed
+```{r}
+library(caret)
+data(GermanCredit)
+ 
+# split the data into training and testing datasets 
+Train <- createDataPartition(GermanCredit$Class, p=0.6, list=FALSE)
+training <- GermanCredit[ Train, ]
+testing <- GermanCredit[ -Train, ]
+ 
+# use glm to train the model on the training dataset. make sure to set family to "binomial"
+mod_fit_one <- glm(Class ~ Age + ForeignWorker + Property.RealEstate + Housing.Own +
+CreditHistory.Critical, data=training, family="binomial")
+ 
+summary(mod_fit_one) # estimates 
+exp(coef(mod_fit_one)) # odds ratios
+predict(mod_fit_one, newdata=testing, type="response") # predicted probabilities
+```
+
+# Appendices
+## Appendix A: Code to Process New Data
+The below function (and package dependencies) take a file of new data and returns a file with the index, predicted likelihood of a claim, and a rough estimate of likely claim cost. The cost estimate is the median value of claims.
+```{r}
+library(tidyverse)
+library(yaztheme)
+library(reshape2)
+library(ggridges)
+library(randomForest)
+library(moments)
+library(mice)
+library(MASS)
+library(dummies)
+library(dplyr)
+score_creator <- function(infile){
+  train <- read_csv(infile)%>%
+    mutate(INCOME = as.numeric(gsub('[$,]','',INCOME)),
+           HOME_VAL = as.numeric(gsub('[$,]','',HOME_VAL)),
+           BLUEBOOK = as.numeric(gsub('[$,]','',BLUEBOOK)),
+           OLDCLAIM = as.numeric(gsub('[$,]','',OLDCLAIM)),
+           PARENT1 = tolower(gsub('[z_<]','', PARENT1)),
+           MSTATUS = tolower(gsub('[z_<]','', MSTATUS)),
+           SEX = tolower(gsub('[z_<]','', SEX)),
+           EDUCATION = tolower(gsub('[z_<]','', EDUCATION)),
+           JOB = tolower(gsub('[z_<]','', JOB)),
+           CAR_USE = tolower(gsub('[z_<]','', CAR_USE)),
+           CAR_TYPE = tolower(gsub('[z_<]','', CAR_TYPE)),
+           RED_CAR = tolower(gsub('[z_<]','', RED_CAR)),
+           REVOKED = tolower(gsub('[z_<]','', REVOKED)),
+           URBANICITY = tolower(gsub('[z_<]','', URBANICITY)))
+  colnames(train) <- tolower(colnames(train))
+  
+  train.flagged <- train%>%
+    mutate_all(funs(na.flag = ifelse(is.na(.),1,0)))
+  int_df <- train.flagged%>%
+    dplyr::select(-index, -target_flag, -target_amt)%>%
+    dplyr::select_if(is.numeric)
+  # md.pattern(int_df)
+  cleaned_cols <- list()
+  for(c in colnames(train%>%
+                    dplyr::select(-index, -target_flag, -target_amt, -kidsdriv)%>%
+                    dplyr::select_if(is.numeric))){
+    column <- train.flagged%>%select_(col = c)
+    iqr <- quantile(column$col, na.rm = T)[4] - quantile(column$col, na.rm = T)[2]
+    low <- quantile(column$col, na.rm = T)[2] - iqr
+    high <- quantile(column$col, na.rm = T)[4] + iqr
+    
+    vals <- c()
+    for(i in seq(1:nrow(int_df))){
+      ifelse(between(column$col[i], low - (1.5*iqr), high + (1.5*iqr)),
+             vals[i] <- column$col[i], 
+             ifelse(is.na(column$col[i]), vals[i] <- NA, vals[i] <- NA))
+    }
+    
+    ifelse(length(vals) == nrow(int_df),
+           cleaned_cols[[c]] <- vals, 
+           cleaned_cols[[c]] <- c(vals,NA))
+  }
+  
+  df2 <- bind_cols(
+    bind_cols(cleaned_cols)%>%
+      # select(-kidsdriv)%>%
+      scale(center = TRUE)%>%
+      data.frame(),
+    train.flagged%>%
+      dplyr::select(ends_with('na.flag'), kidsdriv),
+    train%>%dplyr::select_if(is.character)
+    )
+  
+  df3 <- df2%>%
+    mutate(
+      kidsdriv_out.flag = ifelse(is.na(kidsdriv) & kidsdriv_na.flag ==0,1,0),
+      age_out.flag = ifelse(is.na(age) & age_na.flag ==0,1,0),
+      homekids_out.flag = ifelse(is.na(homekids) & homekids_na.flag ==0,1,0),
+      yoj_out.flag = ifelse(is.na(yoj) & yoj_na.flag ==0,1,0),
+      income_out.flag = ifelse(is.na(income) & income_na.flag ==0,1,0),
+      parent1_out.flag = ifelse(is.na(parent1) & parent1_na.flag ==0,1,0),
+      home_val_out.flag = ifelse(is.na(home_val) & home_val_na.flag ==0,1,0),
+      mstatus_out.flag = ifelse(is.na(mstatus) & mstatus_na.flag ==0,1,0),
+      sex_out.flag = ifelse(is.na(sex) & sex_na.flag ==0,1,0),
+      education_out.flag = ifelse(is.na(education) & education_na.flag ==0,1,0),
+      job_out.flag = ifelse(is.na(job) & job_na.flag ==0,1,0),
+      travtime_out.flag = ifelse(is.na(travtime) & travtime_na.flag ==0,1,0),
+      car_use_out.flag = ifelse(is.na(car_use) & car_use_na.flag ==0,1,0),
+      bluebook_out.flag = ifelse(is.na(bluebook) & bluebook_na.flag ==0,1,0),
+      tif_out.flag = ifelse(is.na(tif) & tif_na.flag ==0,1,0),
+      car_type_out.flag = ifelse(is.na(car_type) & car_type_na.flag ==0,1,0),
+      red_car_out.flag = ifelse(is.na(red_car) & red_car_na.flag ==0,1,0),
+      oldclaim_out.flag = ifelse(is.na(oldclaim) & oldclaim_na.flag ==0,1,0),
+      clm_freq_out.flag = ifelse(is.na(clm_freq) & clm_freq_na.flag ==0,1,0),
+      revoked_out.flag = ifelse(is.na(revoked) & revoked_na.flag ==0,1,0),
+      mvr_pts_out.flag = ifelse(is.na(mvr_pts) & mvr_pts_na.flag ==0,1,0),
+      car_age_out.flag = ifelse(is.na(car_age) & car_age_na.flag ==0,1,0),
+      urbanicity_out.flag = ifelse(is.na(urbanicity) & urbanicity_na.flag ==0,1,0)
+  )
+  
+  temp_df <- mice(df3, method = 'cart', maxit = 1)
+  train_clean <- complete(temp_df)%>%
+    bind_cols(train%>%dplyr::select(index, target_flag, target_amt))
+  data.for.stepaic <- train_clean%>%
+    dplyr::select(-index_na.flag, -target_flag_na.flag, -target_amt_na.flag, 
+           -target_amt)%>%
+    dplyr::select_if(is.numeric)%>%
+    bind_cols(
+      dummy.data.frame(train_clean%>%select_if(is.character))
+    )
+  
+  med.claim <- 4104.00
+  prob.preds <- data.frame(
+    P_TARGET_FLAG = predict(model.prob, data.for.stepaic, type="response")
+    )%>%
+    bind_cols(data.for.stepaic)%>%
+    mutate(P_TARGET_AMT = med.claim)%>%
+    dplyr::select(INDEX = index, P_TARGET_FLAG, P_TARGET_AMT)
+  return(prob.preds)
+}
+test_data <- score_creator('logit_insurance_test.csv')
+write.csv(x = test_data, file = 'nouimehidi_insurance_test.csv')
+```
+
+
