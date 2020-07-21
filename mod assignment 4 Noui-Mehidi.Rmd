@@ -1,0 +1,464 @@
+---
+title: 'MSDS 410: Modeling Assignment 4'
+author: "Nadia Noui-Mehidi"
+date: "8/26/2019"
+output:
+  word_document: default
+  pdf_document: default
+subtitle: The Wine Study
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lessR)
+library(Hmisc)
+library(psych)
+library(arm)
+library(DataExplorer)
+library(readr) 
+library(pbkrtest) 
+library(car) 
+library(leaps) 
+library(MASS)
+library(lessR) 
+library(mltools) 
+library(mice) 
+library(tidyRSS)
+library(VIM) 
+library(missForest) 
+library(effects)
+library(ggplot2) 
+library(scales) 
+library(grid) 
+library(RColorBrewer)
+library (data.table) 
+library (plyr) 
+library (stringr) 
+library(tidyverse)
+library(reshape2)
+library(ggridges)
+library(readr)
+library(dplyr)
+library(zoo)
+library(psych)
+library(ROCR)
+library(corrplot)
+library(car)
+library(InformationValue)
+library(pbkrtest)
+library(car)
+library(leaps)
+library(MASS)
+library(corrplot)
+library(glm2)
+library(aod)
+wine <- read.csv(file="file:///Users/nadianoui-mehidi/Desktop/wine.csv",head=TRUE,sep=",")
+wine<-data.frame(wine)
+```
+
+#Exploratory Data Analysis 
+##Target Variable
+Our target variable is the binary "Purchase" variable. We compute the overall odds and probability of wine being purchased, assuming this data is from a random sample.
+```{r}
+Purchase <- factor(ifelse( wine$Purchase==1, "yes", "no" ) )
+table(Purchase)
+```
+probability of wine being purchased: 
+10061/(2734+10061)=0.79
+
+odds of a wine being purchased:
+0.79/(1-0.79)=3.76
+
+Odds are high!  
+  
+##Continuous Variables 
+Our data set contains 11 continuous predictors all relating to the chemical ingredients in the wine. 
+They are: 
+FixedAcidity, 
+VolatileAcidity, 
+CitricAcid, 
+ResidualSugar, 
+Chlorides 
+FreeSulfurDioxide 
+TotalSulfurDioxide 
+Density  
+pH 
+Sulphates 
+Alcohol. 
+
+A summary of the numeric variables is shown in the table below:
+```{r}
+continuous <- c(5:15)
+continuous<-wine[continuous]
+library(Hmisc)
+#Hmisc::describe(numericvariables)
+library(psych)
+psych::describe(continuous)
+```
+Our numeric variables look reasonable and complete. None of our variables are dramatically skewed. Im not sure what the negative values indicate; Acids and Residiual Sugar could be negative but I dont understand why Sulphate or Sulfur Dioxide would be. When I looked at the histograms for this data, it looks like many of the chemicals have been normalized to make the mean 0. Our data has totally different scales and for a lot of the chemicals the scales are very small. For this reason, we will consider binning them.
+
+
+## Categorical Variables
+‘Stars’, and ‘LabelAppeal’ are multi-categorical variables. These variables, their levels and the proportion of each level that have resulted in a purchase are below:
+
+```{r}
+wine$Purchase<-factor(wine$Purchase)
+#wine$Stars<-factor(wine$Stars)
+wine$LabelAppeal<-factor(wine$LabelAppeal)
+
+mytable <- table(Purchase, wine$STARS, dnn = "Observations by Stars")
+
+prop.table(mytable)
+mytable2 <- table(Purchase, wine$LabelAppeal, dnn = "Observations by LabelAppeal")
+
+prop.table(mytable2)
+
+```
+
+Barplots allow us to develop some preliminary intuition regarding the predictive aspects of our categorical variables:
+
+```{r, echo = FALSE, message=FALSE, warning = FALSE}
+
+par(mfrow=c(2,2))
+#Stars  and Purchase (y/n)
+stars<-table(wine$Purchase,wine$STARS)
+barplot(stars, xlab='Stars',ylab='Purchase?',main="Purchases by star rating", col=c("darkblue","lightcyan") ,legend=rownames(cross), args.legend = list(x = "topleft"))
+#LabelAppeal and Purchase(y/n)
+LabelAppeal<-table(wine$Purchase, wine$LabelAppeal)
+barplot(LabelAppeal, xlab='Label Appeal',ylab='Purchase?',main="Purchases by LabelAppeal",
+col=c("darkblue","lightcyan"),legend=rownames(cross), args.legend = list(x = "topleft"))
+#AcidIndex and Purchase (y/)
+AcidIndex<-table(wine$Purchase, wine$AcidIndex)
+barplot(AcidIndex, xlab='AcidIndex',ylab='Purchase?',main="Purchases by AcidIndex",
+col=c("darkblue","lightcyan"),legend=rownames(cross), args.legend = list(x = "topleft"))
+par(mfrow=c(1,1))
+
+```
+
+The barplots show us that highly rated wines are more likely to be purchased. Label Appeal is a bit less intuitive, it looks like the numbers under label appear may be normalized to make 0 the median. The proportions around the mean are completely symmetrical and increase at the ends. 
+
+##Numeric Data
+
+We look at our numerial variables distribution and their differences in means between purchases vs no purchase to see which, if any, may be predictive of Purchase.
+
+```{r, echo = FALSE, message=FALSE, warning = FALSE}
+
+
+wine$Purchase <- factor(ifelse( wine$Purchase==1, "yes", "no" ) )
+# Histograms for Numeric Variables
+#FixedAcidity 
+par(mfrow=c(2,2))
+hist(wine$FixedAcidity, col = "navy", xlab = "FixedAcidity ", main = "FixedAcidity Hist")
+boxplot(wine$FixedAcidity ~wine$Purchase, col = "lightCyan", main = "Fixed Acidity BoxPlot")
+ #VolatileAcidity
+hist(wine$VolatileAcidity, col = "navy", xlab = "VolatileAcidity ", main = "VolatileAcidity Hist")
+boxplot(wine$VolatileAcidity ~wine$Purchase, col = "lightCyan", main = "VolatileAcidity BoxPlot")
+par(mfrow=c(1,1))
+
+
+#CitricAcid 
+par(mfrow=c(2,2))
+hist(wine$CitricAcid , col = "navy", xlab = "CitricAcid  ", main = "CitricAcid  Hist")
+boxplot(wine$CitricAcid  ~wine$Purchase, col = "lightCyan", main = "CitricAcid  BoxPlot")
+#ResidualSugar 
+hist(wine$ResidualSugar , col = "navy", xlab = "ResidualSugar  ", main = "ResidualSugar  Hist")
+boxplot(wine$ResidualSugar  ~wine$Purchase, col = "lightCyan", main = "ResidualSugar  BoxPlot")
+par(mfrow=c(1,1))
+
+#FreeSulfurDioxide 
+par(mfrow=c(2,2))
+hist(wine$FreeSulfurDioxide, col = "navy", xlab = "FreeSulfurDioxide ", main = "FreeSulfurDioxide Hist")
+boxplot(wine$FreeSulfurDioxide ~wine$Purchase, col = "lightCyan", main = "FreeSulfurDioxide BoxPlot")
+#TotalSulfurDioxide 
+hist(wine$TotalSulfurDioxide , col = "navy", xlab = "TotalSulfurDioxide  ", main = "TotalSulfurDioxide  Hist")
+boxplot(wine$TotalSulfurDioxide  ~wine$Purchase, col = "lightCyan", main = "TotalSulfurDioxide  BoxPlot")
+par(mfrow=c(1,1))
+
+#Density 
+par(mfrow=c(2,2))
+hist(wine$Density , col = "navy", xlab = "Density  ", main = "Density  Hist")
+boxplot(wine$Density  ~wine$Purchase, col = "lightCyan", main = "Density  BoxPlot")
+#pH 
+hist(wine$pH , col = "navy", xlab = "pH  ", main = "pH  Hist")
+boxplot(wine$pH  ~wine$Purchase, col = "lightCyan", main = "pH  BoxPlot")
+par(mfrow=c(1,1))
+
+#Chlorides 
+par(mfrow=c(2,2))
+hist(wine$Chlorides, col = "navy", xlab = "Chlorides ", main = "Chlorides Hist")
+boxplot(wine$Chlorides ~wine$Purchase, col = "lightCyan", main = "Chlorides BoxPlot")
+#Sulphates 
+hist(wine$Sulphates, col = "navy", xlab = "Sulphates ", main = "Sulphates Hist")
+boxplot(wine$Sulphates ~wine$Purchase, col = "lightCyan", main = "Sulphates BoxPlot")
+par(mfrow=c(1,1))
+
+#Alcohol
+par(mfrow=c(2,2))
+hist(wine$Alcohol, col = "navy", xlab = "Alcohol ", main = "Alcohol Hist")
+boxplot(wine$Alcohol ~wine$Purchase, col = "lightCyan", main = "Alcohol BoxPlot")
+#Acid Index
+hist(wine$AcidIndex, col = "navy", xlab = "AcidIndex ", main = "AcidIndex Hist")
+boxplot(wine$AcidIndex ~wine$Purchase, col = "lightCyan", main = "AcidIndex BoxPlot")
+par(mfrow=c(1,1))
+
+
+
+```
+
+
+All of our numeric variables are normally distributed, Acid Index has a slight right skew.
+The difference in means between wines that where Purchased and those that were not is very small and almost non existent. There is no individual variable that is a strong predictor of Purchase. This is another reason to bin the data into groups, we may also want to look at the interaction of the variables. 
+
+
+###Correlation 
+A correlation matrix of our variables is below. None of the numeric variables show evidence of a particularly strong correlation with either of the response variables, and none of the predictors appear strongly correlated with one another.
+```{r}
+library(tidyverse)
+library(corrplot)
+library(tidyverse)
+
+c <- cor(continuous)
+c
+corrplot(c)
+
+```
+
+
+# Data Preparation
+Our data preparation efforts included the imputation of missing values for eight of the predictor variables, the binning of some of the chemical variables, and the creation of interaction variables.
+
+## Missing Data: Imputation via Linear Regression
+As we can see in the table, eight numeric variables have missing data values. The missing values appear as either ‘NA’ values or blank values in the data set. The ‘STARS’ categorical variable has a significant number of missing values (over 25%). The missing data values are summarized by variable name below:
+```{r}
+library(VIM)
+aggr_plot <- aggr(wine, col=c('navyblue','pink'), numbers=TRUE, sortVars=TRUE, labels=names(wine), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+
+Our first data preparation step focused on the imputation of missing data values for eight of the predictor variables: STARS, Sulphates, TotalSulfurDioxide, Alcohol, FreeSulfurDioxide, Chlorides, ResidualSugar, pH
+
+Regression and classification trees are used to impute missing values. We chose not to use the mean or median as a replacement value since regression would yield imputed values that were much more consistent with the actual distribution of the data while introducing much less potential bias.
+
+Our clean data is saved in a clean dataset. 
+```{r eval=FALSE}
+#Regression and classification trees are used to impute missing values for STARS, Sulphates, TotalSulfurDioxide, Alcohol, FreeSulfurDioxide, Chlorides, ResidualSugar, and pH
+tempData <- mice(wine,m=5,maxit=50,method='cart', seed=500)
+w <- mice::complete(tempData,1)
+
+```
+####Inspecting the distribution of original and imputed data
+Let’s compare the distributions of original and imputed data. The density of the imputed data for each imputed dataset is showed in magenta while the density of the observed data is showed in blue. Under our previous assumptions we expect the distributions to be similar. All the distributions look the same except for STARS, the variable with the most missing data. Our imputed dataset has a higher proportion of 1 STAR reviews than our original dataset; we may need to use a different approach for these missing values.
+```{r eval=FALSE}
+xyplot(tempData, Purchase ~ STARS+Sulphates+TotalSulfurDioxide+Alcohol+FreeSulfurDioxide+Chlorides+ResidualSugar+pH, pch=18,cex=1)
+densityplot(tempData)
+stripplot(tempData, pch = 20, cex = 1.2)
+```
+
+
+## Transformation of Variables
+###Binning Continuous Variables
+The units of the following variables are too small for them to be good predictors so we grouped them into bins with 4 levels:
+Fixed Acidity
+Volatile Acidity
+Citric Acid
+Residual Sugar
+Chlorides 
+Free Sulfar Dioxide
+Total Sulfar Dioxide 
+Sulphates
+
+```{r eval=FALSE}
+#FixedAcidity
+w$FixedAcidity.cat <- cut(w$FixedAcidity, breaks = 4, labels = c("FixedAcidity1", "FixedAcidity2", "FixedAcidity3","FixedAcidity4"))
+
+#VolatileAcidity
+w$VolatileAcidity.cat <- cut(w$VolatileAcidity, breaks = 4, labels = c("VolatileAcidity1", "VolatileAcidity2", "VolatileAcidity3","VolatileAcidity4"))
+
+#CitricAcid
+w$CitricAcid.cat <- cut(w$CitricAcid, breaks = 4, labels = c("CitricAcid1", "CitricAcid2", "CitricAcid3","CitricAcid4"))
+
+#ResidualSugar
+w$ResidualSugar.cat <- cut(w$ResidualSugar, breaks = 4, labels = c("ResidualSugar1", "ResidualSugar2", "ResidualSugar3","ResidualSugar4"))
+
+#Chlorides
+w$Chlorides.cat <- cut(w$Chlorides, breaks = 4, labels = c("Chlorides1", "Chlorides2", "Chlorides3","Chlorides4"))
+
+#FreeSulfurDioxide
+w$FreeSulfurDioxide.cat <- cut(w$FreeSulfurDioxide, breaks = 4, labels = c("FreeSulfurDioxide1", "FreeSulfurDioxide2", "FreeSulfurDioxide3","FreeSulfurDioxide4"))
+
+#TotalSulfurDioxide
+w$TotalSulfurDioxide.cat <- cut(w$TotalSulfurDioxide, breaks = 4, labels = c("TotalSulfurDioxide1", "TotalSulfurDioxide2", "TotalSulfurDioxide3","TotalSulfurDioxide4"))
+
+#Sulphates
+w$Sulphates.cat <- cut(w$Sulphates, breaks = 4, labels = c("Sulphates1", "Sulphates2", "Sulphates3","Sulphates4"))
+
+```
+
+###Interaction Variables
+We hypothesis that the interactions between chemicals may be more impactful than the individual chemicals evaluated in isolation, so we created the following interaction terms:
+
+```{r eval=FALSE}
+w$SulfurDioxide <- w$FreeSulfurDioxide*w$TotalSulfurDioxide
+w$Acidity <- w$VolatileAcidity*w$FixedAcidity
+w$SugarAcid <- w$ResidualSugar * w$CitricAcid
+w$SulphateChloride <- w$Chlorides* w$Sulphates
+w$DensitypH<-w$Density* w$pH
+
+```
+
+
+# Models
+
+Three models are developed as part of this project - a logistic regression model using all original variables, a logistic regression model using  our transformed variables and backward selection, and a logistic regression model using forward selection and interaction terms. The models are intended to predict the likelihood that a wine will be purchased.
+
+```{r eval=FALSE}
+require(caTools)  # loading caTools library
+## Loading required package: caTools
+set.seed(123)   #  set seed to ensure you always have same random numbers generated
+sample = sample.split(w,SplitRatio = 0.75) # splits the data in the ratio mentioned in SplitRatio. After splitting marks these rows as logical TRUE and the the remaining are marked as logical FALSE
+trainn =subset(w,sample ==TRUE) # creates a training dataset named train1 with rows which are marked as TRUE
+testt=subset(w, sample==FALSE)
+```
+
+
+
+
+##Binary Model 1: Logit Model using all the original variables
+
+We regress our target variable "Purchase" against all the original (non-transformed) variables.
+
+
+```{r eval=FALSE}
+
+a <- glm(Purchase ~STARS+FreeSulfurDioxide+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+       FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+ AcidIndex, data=trainn,family=binomial)
+
+S(a)
+
+#anova(model, test="Chisq")
+```
+
+Our null hypothesis test for our coefficients states that the odds ratio equals 1 or H0: Bi=0, the test for this hypothesis is carried out by using the Wald test. In the presence of other variables, the variables "FixedAcidity ", "CitricAcid", "ResidualSugar" and "Density" are not significant.
+
+For those coefficients that are significant the following conclusions can be drawn:
+```{r eval=FALSE}
+exp(coef(a)) 
+```
+All the variables have a positive effect on the odds of wine being Purchased. 
+
+STARS: for every one unit increase in STARS, the odds of wine being Purchased increases by a factor of 11.4976675
+VolatileAcidity: for every one unit increase in VolatileAcidity, the odds of wine being Purchased increases by a factor of 0.8158253  
+Chlorides: for every one unit increase in Chlorides, the odds of wine being Purchased increases by a factor of 0.7013001  
+FreeSulfurDioxide: for every one unit increase in FreeSulfurDioxide, the odds of wine being Purchased increases by a factor of 1.0006175 
+TotalSulfurDioxide: for every one unit increase in TotalSulfurDioxide, the odds of wine being Purchased increases by a factor of  1.0008339 
+pH: for every one unit increase in pH, the odds of wine being Purchased increases by a factor of 0.8225218 
+Sulphates: for every one unit increase in Sulphates, the odds of wine being Purchased increases by a factor of 0.8733121 
+Alcohol: for every one unit increase in Alcohol, the odds of wine being Purchased increases by a factor of 0.9810178
+LabelAppeal: for every one unit increase in LabelAppeal, the odds of wine being Purchased increases by a factor of 0.6371216 
+AcidIndex: for every one unit increase in AcidIndex, the odds of wine being Purchased increases by a factor of 0.6689881 
+
+###Model Fit
+We test our classification model on our test data and use a confusion matrix to describe the model's performance.
+
+```{r eval=FALSE}
+library(dmm)
+
+pred <- predict(a, newdata = testt, type = "response")
+
+# Recode factors
+y_pred_num <- ifelse(pred > 0.5, 1, 0)
+y_pred <- factor(y_pred_num, levels=c(0, 1))
+y_act <- testt$Purchase
+y_act <- factor(y_act, levels=c(0, 1))
+confusionMatrix(y_act, y_pred)
+```
+
+The Accuracy tells us that 82% of our cases were classified correctly. Before we assume our model provides valuable information, we compare our accuracy to the "no information rate", or what the model would tell us if we just guessed Purchase for every case. In our models case, our accuracy is actually worse than the No Information Rate, this model is not useful at all. 
+
+
+##Binary Model 2: Transformed Variables + Forward Selection 
+
+We used a forward selection process, this time including our transformed (binned) variables in the model scope. The Forward selection process adds predictor variables one-by-one beginning with the single best variable (according to p-value) and continues to add on variables until a certain cutoff.  In our case, the cutoff is a p-value of 0.05.  The summary of our results are in Table 3 below.
+
+```{r eval=FALSE}
+library("MASS")
+glm.null <- glm(Purchase ~ 1, data = trainn, family = binomial)
+c <- step(glm.null, direction = "forward", trace = 1, scope = ~ STARS+FreeSulfurDioxide.cat+VolatileAcidity.cat+CitricAcid.cat+ResidualSugar.cat+Chlorides.cat+ FreeSulfurDioxide.cat+TotalSulfurDioxide.cat+Density+pH+Sulphates.cat+Alcohol+LabelAppeal+ AcidIndex)
+```
+
+After forward selection our model has selected the following variables: 
+STARS           
+AcidIndex      
+LabelAppeal      
+TotalSulfurDioxide.cat
+VolatileAcidity.cat  
+FreeSulfurDioxide.cat 
+ResidualSugar.cat
+Chlorides.cat          
+Sulphates.cat 
+CitricAcid.cat
+pH                 
+Density   
+
+```{r eval=FALSE}
+summary(c)
+```
+
+###Model Fit
+Our AIC is lower in this model than the first. When tested on our test data, our model shows an improvement in accuracy of less than one percent over our first model. Our accuracy is still lower than our No Information Rate, rendering it useless. 
+
+```{r eval=FALSE}
+library(dmm)
+pred <- predict(c, newdata = testt, type = "response")
+
+# Recode factors
+y_pred_num <- ifelse(pred > 0.5, 1, 0)
+y_pred <- factor(y_pred_num, levels=c(0, 1))
+y_act <- testt$Purchase
+y_act <- factor(y_act, levels=c(0, 1))
+confusionMatrix(y_act, y_pred)
+```
+
+
+#Model 3: Interaction Terms + Forward Selection
+
+I used all of our original variables along with the interactions we created and then used a forward selection process to select variables. 
+
+
+```{r eval=FALSE}
+library("MASS")
+glm.null <- glm(Purchase ~ 1, data = trainn, family = binomial)
+d <- step(glm.null, direction = "forward", trace = 1, scope = ~ STARS+FreeSulfurDioxide+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+ FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+ AcidIndex+DensitypH+SulphateChloride+SugarAcid+Acidity+SulfarDioxide)
+```
+
+After forward selection our model has selected the following variables: 
+STARS           
+AcidIndex      
+LabelAppeal      
+TotalSulfurDioxide  
+VolatileAcidity   
+FreeSulfurDioxide 
+DensitypH        
+CitricAcid         
+Chlorides          
+Sulphates         
+Alcohol          
+pH                 
+Density             
+
+```{r eval=FALSE}
+S(d)
+```
+###Model Fit
+Our third model has the highest AIC and the lowest accuracy of the 3 models. I think our models have failed because we havent created the right transformed variables. We will go back and test more interaction terms and maybe create variables for the ratios of different chemicals (I had a hard time running a model that included a ratio).
+
+```{r eval=FALSE}
+library(dmm)
+pred <- predict(d, newdata = testt, type = "response")
+
+# Recode factors
+y_pred_num <- ifelse(pred > 0.5, 1, 0)
+y_pred <- factor(y_pred_num, levels=c(0, 1))
+y_act <- testt$Purchase
+y_act <- factor(y_act, levels=c(0, 1))
+confusionMatrix(y_act, y_pred)
+```
+
